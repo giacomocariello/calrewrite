@@ -142,7 +142,7 @@ fn shift_ical(input: &str, shift_secs: i64) -> String {
     // DTSTART;TZID=..., DTSTAMP, CREATED, LAST-MODIFIED, etc.
     // Captures: full datetime with optional Z suffix.
     let re = Regex::new(
-        r"(?m)^((?:DTSTART|DTEND|DTSTAMP|CREATED|LAST-MODIFIED|RECURRENCE-ID|EXDATE|RDATE|DUE|COMPLETED|TRIGGER)(?:;[^:]*)?:)(\d{8}T\d{6})(Z?)\r?\n",
+        r"(?m)^((?:DTSTART|DTEND|DTSTAMP|CREATED|LAST-MODIFIED|RECURRENCE-ID|EXDATE|RDATE|DUE|COMPLETED|TRIGGER)(?:;[^:]*)?:)(\d{8}T\d{6})(Z?)(\r?\n)",
     )
     .expect("invalid regex");
 
@@ -152,11 +152,15 @@ fn shift_ical(input: &str, shift_secs: i64) -> String {
         let prefix = &caps[1];
         let dt_str = &caps[2];
         let z_suffix = &caps[3];
+        let line_ending = &caps[4];
 
         let shifted = match NaiveDateTime::parse_from_str(dt_str, "%Y%m%dT%H%M%S") {
             Ok(dt) => {
                 let new_dt = dt + duration;
-                format!("{prefix}{}{z_suffix}\r\n", new_dt.format("%Y%m%dT%H%M%S"))
+                format!(
+                    "{prefix}{}{z_suffix}{line_ending}",
+                    new_dt.format("%Y%m%dT%H%M%S")
+                )
             }
             Err(_) => caps[0].to_string(),
         };
@@ -208,5 +212,24 @@ mod tests {
         assert!(result.contains("VERSION:2.0"));
         assert!(result.contains("SUMMARY:Keep me"));
         assert!(result.contains("LOCATION:Somewhere"));
+    }
+
+    #[test]
+    fn preserves_bare_lf_line_endings() {
+        let ical = "BEGIN:VEVENT\nDTSTART:20250101T120000Z\nDTEND:20250101T130000Z\nSUMMARY:Test\nEND:VEVENT\n";
+        let result = shift_ical(ical, 3600);
+        // Shifted lines must use bare \n, not \r\n
+        assert!(result.contains("DTSTART:20250101T130000Z\n"));
+        assert!(result.contains("DTEND:20250101T140000Z\n"));
+        assert!(!result.contains("\r\n"));
+    }
+
+    #[test]
+    fn preserves_crlf_line_endings() {
+        let ical = "BEGIN:VEVENT\r\nDTSTART:20250101T120000Z\r\nDTEND:20250101T130000Z\r\nSUMMARY:Test\r\nEND:VEVENT\r\n";
+        let result = shift_ical(ical, 3600);
+        // Shifted lines must keep \r\n
+        assert!(result.contains("DTSTART:20250101T130000Z\r\n"));
+        assert!(result.contains("DTEND:20250101T140000Z\r\n"));
     }
 }
