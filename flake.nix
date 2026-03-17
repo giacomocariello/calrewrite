@@ -47,6 +47,7 @@
             commonArgs
             // {
               inherit cargoArtifacts;
+              meta.mainProgram = "calrewrite";
             }
           );
         in
