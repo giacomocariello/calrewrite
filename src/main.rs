@@ -6,8 +6,23 @@ use axum::{
     Router,
 };
 use chrono::{Duration, NaiveDateTime};
+use clap::Parser;
 use regex::Regex;
 use std::net::SocketAddr;
+
+/// iCal timeshift proxy — fetches an ICS feed and shifts all datetimes
+/// by a configurable offset.
+#[derive(Parser, Debug)]
+#[command(version, about)]
+struct Args {
+    /// Address to bind to
+    #[arg(long, default_value = "0.0.0.0", env = "CALREWRITE_HOST")]
+    host: String,
+
+    /// Port to listen on
+    #[arg(short, long, default_value_t = 3000, env = "CALREWRITE_PORT")]
+    port: u16,
+}
 
 #[derive(serde::Deserialize)]
 struct Params {
@@ -17,7 +32,12 @@ struct Params {
 
 #[tokio::main]
 async fn main() {
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    let args = Args::parse();
+
+    let addr: SocketAddr = format!("{}:{}", args.host, args.port)
+        .parse()
+        .expect("invalid host:port");
+
     let app = Router::new().route("/", get(handler));
 
     let listener = tokio::net::TcpListener::bind(addr)

@@ -8,5 +8,6 @@ axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
 serde = { version = "1", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 regex = "1"
 chrono = "0.4"
