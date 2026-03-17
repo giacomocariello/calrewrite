@@ -49,31 +49,86 @@ async fn main() {
 }
 
 async fn handler(Query(params): Query<Params>) -> impl IntoResponse {
+    // Restrict URL scheme to http(s) to prevent SSRF (file://, ftp://, etc.)
+    if !params.url.starts_with("http://") && !params.url.starts_with("https://") {
+        return (
+            StatusCode::BAD_REQUEST,
+            HeaderMap::new(),
+            "only http and https URLs are allowed".to_string(),
+        );
+    }
+
     let body = match fetch_ical(&params.url).await {
         Ok(b) => b,
         Err(e) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                HeaderMap::new(),
-                format!("failed to fetch upstream ical: {e}"),
-            );
+            let (status, msg) = match e {
+                FetchError::Request(e) => (
+                    StatusCode::BAD_GATEWAY,
+                    format!("failed to fetch upstream ical: {e}"),
+                ),
+                FetchError::NotCalendar(ct) => (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("upstream Content-Type is not text/calendar: {ct}"),
+                ),
+                FetchError::InvalidBody => (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "upstream response is not a valid iCalendar feed (missing BEGIN:VCALENDAR)"
+                        .to_string(),
+                ),
+            };
+            return (status, HeaderMap::new(), msg);
         }
     };
 
     let shifted = shift_ical(&body, params.shift);
 
     let mut headers = HeaderMap::new();
-    headers.insert("content-type", "text/calendar; charset=utf-8".parse().unwrap());
+    headers.insert(
+        "content-type",
+        "text/calendar; charset=utf-8".parse().unwrap(),
+    );
 
     (StatusCode::OK, headers, shifted)
 }
 
-async fn fetch_ical(url: &str) -> Result<String, reqwest::Error> {
+enum FetchError {
+    Request(reqwest::Error),
+    NotCalendar(String),
+    InvalidBody,
+}
+
+async fn fetch_ical(url: &str) -> Result<String, FetchError> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
-        .build()?;
-    let resp = client.get(url).send().await?.error_for_status()?;
-    resp.text().await
+        .build()
+        .map_err(FetchError::Request)?;
+
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(FetchError::Request)?
+        .error_for_status()
+        .map_err(FetchError::Request)?;
+
+    // Validate Content-Type header
+    if let Some(ct) = resp.headers().get(reqwest::header::CONTENT_TYPE) {
+        let ct_str = ct.to_str().unwrap_or("");
+        let mime_part = ct_str.split(';').next().unwrap_or("").trim();
+        if mime_part != "text/calendar" {
+            return Err(FetchError::NotCalendar(ct_str.to_string()));
+        }
+    }
+
+    let body = resp.text().await.map_err(FetchError::Request)?;
+
+    // Validate body looks like an iCalendar feed
+    let trimmed = body.trim_start();
+    if !trimmed.starts_with("BEGIN:VCALENDAR") {
+        return Err(FetchError::InvalidBody);
+    }
+
+    Ok(body)
 }
 
 /// Shift all iCal datetime properties by `shift_secs` seconds.
