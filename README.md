@@ -18,7 +18,31 @@ nix run            # via Nix
 cargo run          # via Cargo
 ```
 
-The server listens on `0.0.0.0:3000`. Make a GET request with two query parameters:
+### Configuration
+
+The bind address and port are configurable via CLI flags or environment variables:
+
+```
+$ calrewrite --help
+Usage: calrewrite [OPTIONS]
+
+Options:
+      --host <HOST>  Address to bind to [env: CALREWRITE_HOST=] [default: 0.0.0.0]
+  -p, --port <PORT>  Port to listen on [env: CALREWRITE_PORT=] [default: 3000]
+  -h, --help         Print help
+  -V, --version      Print version
+```
+
+Examples:
+
+```sh
+calrewrite --host 127.0.0.1 --port 8080
+CALREWRITE_PORT=8080 calrewrite
+```
+
+### Query parameters
+
+Make a GET request with two query parameters:
 
 | Parameter | Description |
 |-----------|-------------|
@@ -48,6 +72,45 @@ All standard iCal datetime properties are shifted:
 `DTSTART`, `DTEND`, `DTSTAMP`, `CREATED`, `LAST-MODIFIED`, `RECURRENCE-ID`, `EXDATE`, `RDATE`, `DUE`, `COMPLETED`, `TRIGGER`
 
 Both UTC timestamps (`20250101T120000Z`) and TZID-qualified datetimes (`DTSTART;TZID=Europe/Berlin:20250101T120000`) are handled. Date-only values (all-day events) are left untouched.
+
+## NixOS module
+
+The flake exports a NixOS module at `nixosModules.calrewrite`. Add it to your system configuration:
+
+```nix
+# flake.nix
+{
+  inputs.calrewrite.url = "github:giacomocariello/calrewrite";
+
+  outputs = { nixpkgs, calrewrite, ... }: {
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      modules = [
+        calrewrite.nixosModules.calrewrite
+        {
+          services.calrewrite = {
+            enable = true;
+            host = "127.0.0.1";
+            port = 3000;
+            openFirewall = false;
+          };
+        }
+      ];
+    };
+  };
+}
+```
+
+### Module options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enable` | bool | `false` | Enable the calrewrite service |
+| `package` | package | flake default | The calrewrite package to use |
+| `host` | string | `"127.0.0.1"` | Address to bind to |
+| `port` | port | `3000` | Port to listen on |
+| `openFirewall` | bool | `false` | Whether to open the firewall for the port |
+
+The service runs as a hardened systemd unit with `DynamicUser`, restricted syscalls, and read-only filesystem access.
 
 ## Development
 
